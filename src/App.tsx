@@ -1,5 +1,4 @@
 import { useRef, useState, useEffect } from "react";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -15,14 +14,29 @@ import RgbQuant from "rgbquant";
 
 export default function App() {
   const originalCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const pixelCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const resultCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
   const [imageSrc, setImageSrc] = useState<HTMLImageElement | null>(null);
-  const [pixelWidth, setPixelWidth] = useState<number | undefined>(32);
-  const [pixelHeight, setPixelHeight] = useState<number | undefined>(32);
+
+  const [resultWidth, setResultWidth] = useState<number | undefined>(32);
+  const [resultHeight, setResultHeight] = useState<number | undefined>(32);
+
   const [colorsCount, setColorsCount] = useState<number | undefined>(16);
   const [matchAspectRatio, setMatchAspectRatio] = useState<boolean>(false);
+
   const [dithKern, setDithKern] = useState<string>("None");
   const [dithDelta, setDithDelta] = useState<number>(0.5);
+
+  const [enableReduceColors, setEnableReduceColors] = useState<boolean>(true);
+  const [enableDithering, setEnableDithering] = useState<boolean>(false);
+
+  type ImageProcessOptions = {
+    reduceColors: boolean;
+    colorsCount: number;
+    dithering: boolean;
+    dithKern: string | null;
+    dithDelta: number;
+  };
 
   const loadImage = (file: File) => {
     const img = new Image();
@@ -37,7 +51,7 @@ export default function App() {
       setImageSrc(img);
 
       if (matchAspectRatio) {
-        matchRatio(pixelWidth);
+        matchRatio(resultWidth);
       }
     };
     img.src = URL.createObjectURL(file);
@@ -45,70 +59,53 @@ export default function App() {
 
   const pixelate = () => {
     if (!imageSrc) return;
+
     const originalCanvas = originalCanvasRef.current;
-    const pixelCanvas = pixelCanvasRef.current;
-    if (!originalCanvas || !pixelCanvas) return;
-    const octx = originalCanvas.getContext("2d");
-    const pctx = pixelCanvas.getContext("2d");
-    if (!octx || !pctx) return;
+    const resultCanvas = resultCanvasRef.current;
+    if (!originalCanvas || !resultCanvas) return;
 
-    const pw = pixelWidth || 32;
-    const ph = pixelHeight || 32;
+    const originalContext = originalCanvas.getContext("2d");
+    const resultContext = resultCanvas.getContext("2d");
+    if (!originalContext || !resultContext) return;
 
-    const smallCanvas = document.createElement("canvas");
-    smallCanvas.width = pw;
-    smallCanvas.height = ph;
-    const sctx = smallCanvas.getContext("2d")!;
-    sctx.imageSmoothingEnabled = false;
-    sctx.drawImage(originalCanvas, 0, 0, pw, ph);
+    const targetWidth = resultWidth || 32;
+    const targetHeight = resultHeight || 32;
 
+    // 1. Уменьшаем изображение до нужного размера без сглаживания. Пикселизируем его
+    const targetCanvas = document.createElement("canvas");
+    targetCanvas.width = targetWidth;
+    targetCanvas.height = targetHeight;
+    const targetContext = targetCanvas.getContext("2d")!;
+    targetContext.imageSmoothingEnabled = false;
+    targetContext.drawImage(originalCanvas, 0, 0, targetWidth, targetHeight);
+
+    // 2. Обрабатываем изображение (Уменьшаем цвета, добавляем шум)
     try {
-      const cc = colorsCount ?? 0;
-      if (cc > 0) {
-        const imgData = sctx.getImageData(0, 0, pw, ph);
-        const reduced = reduceColors(imgData, cc);
-
-        if (
-          reduced &&
-          (reduced instanceof Uint8Array || Array.isArray(reduced))
-        ) {
-          const arr = reduced as any;
-          // case: RGBA length matches original
-          if (arr.length === imgData.data.length) {
-            const put = new ImageData(new Uint8ClampedArray(arr), pw, ph);
-            sctx.putImageData(put, 0, 0);
-          } else if (arr.length === pw * ph * 3) {
-            // RGB -> convert to RGBA
-            const out = new Uint8ClampedArray(pw * ph * 4);
-            for (let i = 0, j = 0; i < pw * ph; i++, j += 3) {
-              const k = i * 4;
-              out[k] = arr[j];
-              out[k + 1] = arr[j + 1];
-              out[k + 2] = arr[j + 2];
-              out[k + 3] = 255;
-            }
-            const put = new ImageData(out, pw, ph);
-            sctx.putImageData(put, 0, 0);
-          } else {
-            // unknown format: ignore
-            console.warn(
-              "reduceColors returned unexpected array length",
-              arr.length
-            );
-          }
-        }
-      }
+      processImage(targetContext, targetWidth, targetHeight, {
+        reduceColors: enableReduceColors,
+        colorsCount: colorsCount ?? 16,
+        dithering: enableDithering,
+        dithKern: enableDithering && dithKern !== "None" ? dithKern : null,
+        dithDelta,
+      });
     } catch (err) {
-      console.error("Color reduction failed:", err);
+      console.error("Error processsingImage:", err);
     }
 
-    pixelCanvas.width = originalCanvas.width;
-    pixelCanvas.height = originalCanvas.height;
-    pctx.imageSmoothingEnabled = false;
-    pctx.drawImage(smallCanvas, 0, 0, pixelCanvas.width, pixelCanvas.height);
+    // 3. Растягиваем промежуточное изображение до размеров оригинального. Вставляем в canvas на интерфейсе
+    resultCanvas.width = originalCanvas.width;
+    resultCanvas.height = originalCanvas.height;
+    resultContext.imageSmoothingEnabled = false;
+    resultContext.drawImage(
+      targetCanvas,
+      0,
+      0,
+      resultCanvas.width,
+      resultCanvas.height
+    );
   };
 
-  const matchRatio = (newPixelWidth?: number, newPixelHeight?: number) => {
+  const matchRatio = (newResultWidth?: number, newResultHeight?: number) => {
     const originalWidth = originalCanvasRef.current?.width;
     const originalHeight = originalCanvasRef.current?.height;
 
@@ -116,37 +113,81 @@ export default function App() {
 
     const aspect = originalHeight / originalWidth;
 
-    if (typeof newPixelWidth === "number") {
-      const h = Math.max(1, Math.round(newPixelWidth * aspect));
-      setPixelHeight(h);
+    if (typeof newResultWidth === "number") {
+      const h = Math.max(1, Math.round(newResultWidth * aspect));
+      setResultHeight(h);
       return;
     }
 
-    if (typeof newPixelHeight === "number") {
-      const w = Math.max(1, Math.round(newPixelHeight / aspect));
-      setPixelWidth(w);
+    if (typeof newResultHeight === "number") {
+      const w = Math.max(1, Math.round(newResultHeight / aspect));
+      setResultWidth(w);
       return;
     }
 
-    if (typeof pixelWidth === "number") {
-      const h = Math.max(1, Math.round(pixelWidth * aspect));
-      setPixelHeight(h);
+    if (typeof resultWidth === "number") {
+      const h = Math.max(1, Math.round(resultWidth * aspect));
+      setResultHeight(h);
     }
   };
 
-  const reduceColors = (imageData: ImageData, colorCount: number) => {
-    var opts = {
-      colors: colorCount,
-      dithKern: dithKern === "None" ? null : dithKern,
-      dithDelta: dithDelta,
-    };
+  const processImage = (
+    canvasContext: CanvasRenderingContext2D,
+    targetWidth: number,
+    targetHeight: number,
+    options: ImageProcessOptions
+  ) => {
+    let imgData = canvasContext.getImageData(0, 0, targetWidth, targetHeight);
 
-    let q = new RgbQuant(opts);
+    if (options.reduceColors && options.colorsCount > 0) {
+      imgData = reduceColors(imgData, options);
+    }
+
+    canvasContext.putImageData(imgData, 0, 0);
+  };
+
+  const reduceColors = (
+    imageData: ImageData,
+    options: ImageProcessOptions
+  ): ImageData => {
+    const q = new RgbQuant({
+      colors: options.colorsCount,
+      dithKern: options.dithering ? options.dithKern : null,
+      dithDelta: options.dithDelta,
+    });
+
     q.sample(imageData);
-    let palettedData = q.palette(true);
-    console.log(palettedData);
-    let out = q.reduce(imageData);
-    return out;
+    const reduced = q.reduce(imageData);
+
+    return toRGBA(reduced as Uint8Array, imageData.width, imageData.height);
+  };
+
+  const toRGBA = (
+    data: Uint8Array | number[],
+    width: number,
+    height: number
+  ): ImageData => {
+    const pixelCount = width * height;
+
+    // RGBA
+    if (data.length === pixelCount * 4) {
+      return new ImageData(new Uint8ClampedArray(data), width, height);
+    }
+
+    // RGB → RGBA
+    if (data.length === pixelCount * 3) {
+      const out = new Uint8ClampedArray(pixelCount * 4);
+      for (let i = 0, j = 0; i < pixelCount; i++, j += 3) {
+        const k = i * 4;
+        out[k] = data[j];
+        out[k + 1] = data[j + 1];
+        out[k + 2] = data[j + 2];
+        out[k + 3] = 255;
+      }
+      return new ImageData(out, width, height);
+    }
+
+    throw new Error(`Unexpected data length: ${data.length}`);
   };
 
   useEffect(() => {
@@ -161,14 +202,16 @@ export default function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [imageSrc, colorsCount, dithKern, dithDelta, pixelWidth, pixelHeight]);
+  }, [imageSrc, colorsCount, dithKern, dithDelta, resultWidth, resultHeight, enableReduceColors, enableDithering]);
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-start p-8 bg-gray-50">
-      <h1 className="text-3xl font-bold mb-8">Image Pixelator</h1>
-      <div className="flex flex-col items-center gap-6 w-full max-w-3xl">
-        {/* Загрузка и кнопка */}
-        <div className="flex flex-col md:flex-row items-center gap-4 w-full">
+    <div className="grid grid-cols-4 gap-2">
+      <div className="col-span-1 p-1">
+        <div className="border-2 border-black text-center mb-2">
+          Общие настройки
+        </div>
+        {/* Загрузка изображения */}
+        <div className="flex flex-row items-center gap-4 w-full">
           <Input
             type="file"
             accept="image/*"
@@ -176,159 +219,176 @@ export default function App() {
               const file = e.target.files?.[0];
               if (file) loadImage(file);
             }}
-            className="flex-1 cursor-pointer"
+            className="flex-1 cursor-pointer border-black"
           />
         </div>
-        {/* Настройки размеров */}
-        <div className="flex flex-col md:flex-row items-center gap-4 w-full justify-center">
-          <div className="flex flex-col gap-1">
-            <Label>Width (px)</Label>
-            <Input
-              type="number"
-              value={pixelWidth ?? ""}
-              onChange={(e) => {
-                const val = e.target.value;
-                if (val === "") {
-                  setPixelWidth(undefined);
-                  return;
-                }
-                let newWidth = parseInt(val);
-                setPixelWidth(newWidth);
-                if (matchAspectRatio) {
-                  matchRatio(newWidth);
-                }
-              }}
-              className="w-28"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-1">
-              <Label>Match height to aspect ratio</Label>
-              <Checkbox
-                id="matchAspectRatio"
-                onCheckedChange={(checked) => {
-                  setMatchAspectRatio(!!checked);
-                  if (checked) {
-                    matchRatio(pixelWidth);
-                  }
-                }}
-              />
-            </div>
-          </div>
-          <div className="flex flex-col gap-1">
-            <Label>Height (px)</Label>
-            <Input
-              type="number"
-              value={pixelHeight ?? ""}
-              onChange={(e) => {
-                const val = e.target.value;
-                setPixelHeight(val === "" ? undefined : parseInt(val));
-              }}
-              disabled={matchAspectRatio}
-              className={
-                matchAspectRatio
-                  ? "w-28 bg-gray-200 cursor-not-allowed"
-                  : "w-28"
+        {/* Ширина */}
+        <div className="grid grid-cols-2 gap-1 mb-2">
+          <Label className="justify-self-center">Ширина (px)</Label>
+          <Input
+            type="number"
+            min={1}
+            value={resultWidth ?? ""}
+            onChange={(e) => {
+              const val = e.target.value;
+              if (val === "") {
+                setResultWidth(undefined);
+                return;
               }
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <Label>Количество цветов</Label>
-            <Input
-              type="number"
-              value={colorsCount ?? ""}
-              onChange={(e) => {
-                const val = e.target.value;
-                setColorsCount(val === "" ? undefined : parseInt(val));
+              let newWidth = parseInt(val);
+              setResultWidth(newWidth);
+              if (matchAspectRatio) {
+                matchRatio(newWidth);
+              }
+            }}
+            className="w-28 justify-self-center"
+          />
+        </div>
+        {/* Высота */}
+        <div className="grid grid-cols-2 gap-1 mb-2">
+          <Label className="justify-self-center">Высота (px)</Label>
+          <Input
+            type="number"
+            min={1}
+            value={resultHeight ?? ""}
+            onChange={(e) => {
+              const val = e.target.value;
+              setResultHeight(val === "" ? undefined : parseInt(val));
+            }}
+            disabled={matchAspectRatio}
+            className={
+              matchAspectRatio
+                ? "w-28 bg-gray-200 cursor-not-allowed justify-self-center"
+                : "w-28 justify-self-center"
+            }
+          />
+        </div>
+        {/* Сохранить соотношение сторон */}
+        <div className="grid grid-cols-2 gap-1 mb-2 items-center">
+          <Label className="text-center">Сохранить соотношение сторон?</Label>
+          <Checkbox
+            id="matchAspectRatio"
+            className="justify-self-center border-black"
+            onCheckedChange={(checked) => {
+              setMatchAspectRatio(!!checked);
+              if (checked) {
+                matchRatio(resultWidth);
+              }
+            }}
+          />
+        </div>
+        <div className="border-2 border-black text-center mb-2">
+          Настройка цвета
+        </div>
+        {/* Уменьшить количество цветов */}
+        <div className="grid grid-cols-2 gap-1 mb-2 items-center">
+          <Label className="text-center">Уменьшить количество цветов?</Label>
+          <Checkbox
+            id="reduceColors"
+            className="justify-self-center border-black"
+            checked={enableReduceColors}
+            onCheckedChange={(checked) => setEnableReduceColors(!!checked)}
+          />
+        </div>
+        {/* Количество цветов */}
+        <div className="grid grid-cols-2 gap-1 mb-2">
+          <Label className="justify-self-center">Количество цветов</Label>
+          <Input
+            type="number"
+            min={0}
+            disabled={!enableReduceColors}
+            value={colorsCount ?? ""}
+            onChange={(e) => {
+              const val = e.target.value;
+              setColorsCount(val === "" ? undefined : parseInt(val));
+            }}
+            className="w-28 justify-self-center"
+          />
+        </div>
+        {/* Добавить шум */}
+        <div className="grid grid-cols-2 gap-1 mb-2 items-center">
+          <Label className="justify-self-center">Добавить шум?</Label>
+          <Checkbox
+            id="addDithering"
+            className="justify-self-center border-black"
+            disabled={!enableReduceColors}
+            checked={enableDithering}
+            onCheckedChange={(checked) => setEnableDithering(!!checked)}
+          />
+        </div>
+        {/* Алгоритм шума */}
+        <div className="grid grid-cols-2 gap-1 mb-2">
+          <Label className="justify-self-center">Алгоритм шума</Label>
+          <Select
+            disabled={!enableDithering || !enableReduceColors}
+            defaultValue={dithKern}
+            onValueChange={(v) => setDithKern(v)}
+          >
+            <SelectTrigger className="min-w-40 justify-self-center">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="None">Никакой</SelectItem>
+              <SelectItem value="FloydSteinberg">FloydSteinberg</SelectItem>
+              <SelectItem value="FalseFloydSteinberg">
+                FalseFloydSteinberg
+              </SelectItem>
+              <SelectItem value="Stucki">Stucki</SelectItem>
+              <SelectItem value="Atkinson">Atkinson</SelectItem>
+              <SelectItem value="Jarvis">Jarvis</SelectItem>
+              <SelectItem value="Burkes">Burkes</SelectItem>
+              <SelectItem value="Sierra">Sierra</SelectItem>
+              <SelectItem value="TwoSierra">TwoSierra</SelectItem>
+              <SelectItem value="SierraLite">SierraLite</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {/* Сила шума */}
+        <div className="grid grid-cols-2 gap-1 mb-2">
+          <Label className="justify-self-center">Сила шума</Label>
+          <div>
+            <div className="text-center">{dithDelta.toFixed(2)}</div>
+            <Slider
+              value={[dithDelta]}
+              disabled={!enableDithering || !enableReduceColors}
+              onValueChange={([v]) => {
+                setDithDelta(v);
               }}
-              className="w-28"
+              min={0}
+              max={1}
+              step={0.01}
             />
           </div>
         </div>
-        {/* Dithering settings */}
-        <div className="flex flex-col md:flex-row items-center gap-4 w-full justify-center mt-2">
-          <div className="flex items-center gap-2">
-            <Label className="mr-2">Dithering</Label>
-            <Select
-              defaultValue={dithKern}
-              onValueChange={(v) => setDithKern(v)}
-            >
-              <SelectTrigger className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="None">None</SelectItem>
-                <SelectItem value="FloydSteinberg">FloydSteinberg</SelectItem>
-                <SelectItem value="FalseFloydSteinberg">
-                  FalseFloydSteinberg
-                </SelectItem>
-                <SelectItem value="Stucki">Stucki</SelectItem>
-                <SelectItem value="Atkinson">Atkinson</SelectItem>
-                <SelectItem value="Jarvis">Jarvis</SelectItem>
-                <SelectItem value="Burkes">Burkes</SelectItem>
-                <SelectItem value="Sierra">Sierra</SelectItem>
-                <SelectItem value="TwoSierra">TwoSierra</SelectItem>
-                <SelectItem value="SierraLite">SierraLite</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="flex flex-col gap-1 w-1/3">
-            <div className="flex items-center justify-between">
-              <Label>Dither strength</Label>
-              <div className="text-sm">{dithDelta.toFixed(2)}</div>
-            </div>
-            <div className="w-48">
-              <Slider
-                value={[dithDelta]}
-                onValueChange={([v]) => {
-                  setDithDelta(v);
-                }}
-                min={0}
-                max={1}
-                step={0.05}
-              />
-            </div>
-          </div>
-        </div>
-        {/* Canvas */}
-        <div className="flex flex-col md:flex-row gap-12 mt-6 items-start justify-center w-full">
-          {/* Original */}
+      </div>
+      <div className="col-span-3">
+        <div className="grid grid-cols-2 gap-6">
+          {/* Оргинальное изображение */}
           <div className="flex flex-col items-center">
-            <h3 className="text-lg font-semibold mb-2">Original</h3>
-            {/* Original */}
+            <h3 className="text-lg font-semibold mb-2">
+              Оргинальное изображение
+            </h3>
             <canvas
               ref={originalCanvasRef}
-              className="border border-gray-300"
               style={{
                 width: "100%",
                 height: "auto",
-                maxWidth: "700px",
-                imageRendering: "pixelated",
               }}
             />
           </div>
-          {/* Pixelated */}
-          <div className="relative flex flex-col items-center pl-12">
-            <h3 className="text-lg font-semibold mb-2">Pixelated</h3>
-            {/* Height label */}
-            <div className="absolute -left-2 top-1/2 -translate-y-1/2 rotate-[-90deg] text-sm">
-              Height: {pixelHeight}px
-            </div>
+          {/* Обработанное изображение */}
+          <div className="flex flex-col items-center">
+            <h3 className="text-lg font-semibold mb-2">
+              Обработанное изображение
+            </h3>
             <canvas
-              ref={pixelCanvasRef}
-              className="border border-gray-300"
+              ref={resultCanvasRef}
               style={{
                 width: "100%",
                 height: "auto",
-                maxWidth: "700px",
                 imageRendering: "pixelated",
               }}
             />
-            {/* Width label */}
-            <div className="text-center text-sm mt-1">
-              Width: {pixelWidth}px
-            </div>
           </div>
         </div>
       </div>
