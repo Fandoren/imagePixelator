@@ -4,6 +4,8 @@ services:
   imagepixelator:
     build: .
     container_name: imagePixelator
+    ports:
+      - "8080:80"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.imagepixelator.rule=Host(`imagepixelator.localhost`)"

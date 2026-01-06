@@ -21,7 +21,8 @@ export default function TwoCanvasesDisplay({
           ref={leftCanvasRef}
           style={{
             width: "100%",
-            height: "auto",
+            maxHeight: "75vh",
+            objectFit: "contain",
           }}
         />
       </div>
@@ -31,7 +32,8 @@ export default function TwoCanvasesDisplay({
           ref={rightCanvasRef}
           style={{
             width: "100%",
-            height: "auto"
+            maxHeight: "75vh",
+            objectFit: "contain",
           }}
         />
       </div>

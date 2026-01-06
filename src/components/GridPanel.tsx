@@ -8,7 +8,10 @@ interface GridPanelProps {
   resultCanvasRef: React.RefObject<HTMLCanvasElement | null>;
 }
 
-export default function GridPanel({ processedCanvas, resultCanvasRef }: GridPanelProps) {
+export default function GridPanel({
+  processedCanvas,
+  resultCanvasRef,
+}: GridPanelProps) {
   const imageWithGridRef = useRef<HTMLCanvasElement | null>(null);
   const gridOnlyRef = useRef<HTMLCanvasElement | null>(null);
 

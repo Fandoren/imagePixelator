@@ -72,21 +72,29 @@ export default function PixelDrawingPanel({
   };
 
   const handleDownloadImage = () => {
-    downloadImage({type: 'png'});
+    downloadImage({ type: "png" });
   };
 
   return (
     <div className="grid grid-cols-4 gap-2 p-1">
       <div className="col-span-1">
         <div className="grid grid-cols-1">
-          <Button className="mt-2" onClick={() => handleFillPixels()}>
+          <Button
+            className="mt-2"
+            variant={"success"}
+            onClick={() => handleFillPixels()}
+          >
             Создать полотно для рисования
-          </Button>
-          <Button className="my-2" onClick={() => clear()}>
-            Очистить
           </Button>
           <Button className="my-2" onClick={() => handleDownloadImage()}>
             Скачать изображение
+          </Button>
+          <Button
+            className="my-2"
+            variant={"destructive"}
+            onClick={() => clear()}
+          >
+            Очистить
           </Button>
 
           <div className="border-2 border-black text-center mb-2">
