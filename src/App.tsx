@@ -8,6 +8,7 @@ import {
 import { loadImageToCanvas } from "@/lib/imageLoader";
 import GridPanel from "@/components/GridPanel";
 import { Separator } from "./components/ui/separator";
+import PixelDrawingPanel from "./components/PixelDrawingPanel";
 
 export default function App() {
   const originalCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -83,8 +84,6 @@ export default function App() {
     if (res.resultHeight !== undefined) setResultHeight(res.resultHeight);
   };
 
-  
-
   useEffect(() => {
     if (imageSrc) {
       pixelate();
@@ -152,6 +151,17 @@ export default function App() {
 
       {/* Добавление сетки */}
       <GridPanel
+        processedCanvas={processedCanvas}
+        resultCanvasRef={resultCanvasRef}
+      />
+
+      {/* Разделитель */}
+      <div className="flex justify-center">
+        <Separator className="my-4 max-w-9/10 bg-black" />
+      </div>
+
+      {/* Рисование пикселей */}
+      <PixelDrawingPanel
         processedCanvas={processedCanvas}
         resultCanvasRef={resultCanvasRef}
       />
